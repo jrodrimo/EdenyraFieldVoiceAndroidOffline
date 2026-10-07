@@ -1,0 +1,80 @@
+name: Build Edenyra Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    env:
+      PROJECT_DIR: extracted/EdenyraFieldVoiceAndroidOfflineBuildable
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Unpack Android project
+        run: |
+          mkdir -p extracted
+          unzip -q EdenyraFieldVoiceAndroidOfflineBuildable.zip -d extracted
+          ls -la "$PROJECT_DIR"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Download Whisper multilingual base model
+        run: |
+          mkdir -p "$PROJECT_DIR/app/src/main/assets/models"
+
+          curl -L --fail --retry 3 \
+            -o "$PROJECT_DIR/app/src/main/assets/models/ggml-base.bin" \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+
+          ls -lh "$PROJECT_DIR/app/src/main/assets/models/ggml-base.bin"
+
+          test $(stat -c%s "$PROJECT_DIR/app/src/main/assets/models/ggml-base.bin") -gt 100000000
+
+      - name: Build APK
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:assembleDebug --stacktrace
+
+      - name: Prepare downloadable APK
+        run: |
+          cp \
+            "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" \
+            Edenyra-Field-Voice-offline.apk
+
+          ls -lh Edenyra-Field-Voice-offline.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Edenyra-Field-Voice-offline-APK
+          path: Edenyra-Field-Voice-offline.apk
+          if-no-files-found: error
