@@ -18,20 +18,18 @@ jobs:
       PROJECT_DIR: extracted/EdenyraFieldVoiceAndroidOfflineBuildable
 
     steps:
-
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Unpack Android project
         run: |
+          rm -rf extracted
           mkdir -p extracted
           unzip -q EdenyraFieldVoiceAndroidOfflineBuildable.zip -d extracted
-
-          echo "Project contents:"
           ls -la "$PROJECT_DIR"
 
       - name: Set up Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
@@ -39,21 +37,12 @@ jobs:
       - name: Locate Android SDK manager
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)
-
           if [ -z "$SDKMANAGER" ]; then
             echo "sdkmanager was not found"
-            find "$ANDROID_HOME" -maxdepth 4 -type f | head -100
             exit 1
           fi
-
-          echo "Found sdkmanager:"
-          echo "$SDKMANAGER"
-
           echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
-
           "$SDKMANAGER" --version
 
       - name: Accept Android SDK licenses
@@ -68,61 +57,49 @@ jobs:
             "build-tools;35.0.0"
 
       - name: Set up Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "8.9"
-
-      - name: Show Gradle version
-        run: |
-          gradle --version
 
       - name: Download Whisper multilingual base model
         run: |
           mkdir -p "$PROJECT_DIR/app/src/main/assets/models"
-
           curl -L --fail --retry 3 \
             -o "$PROJECT_DIR/app/src/main/assets/models/ggml-base.bin" \
             https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
-
-          echo "Whisper model:"
           ls -lh "$PROJECT_DIR/app/src/main/assets/models/ggml-base.bin"
-
           test $(stat -c%s "$PROJECT_DIR/app/src/main/assets/models/ggml-base.bin") -gt 100000000
+
+      - name: Remove obsolete Gradle model-download task
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("extracted/EdenyraFieldVoiceAndroidOfflineBuildable/app/build.gradle.kts")
+          s = p.read_text()
+          marker = "// The model is intentionally not stored in this ZIP"
+          if marker in s:
+              s = s.split(marker, 1)[0].rstrip() + "\n"
+          p.write_text(s)
+          print(p.read_text())
+          PY
 
       - name: Build APK
         run: |
           cd "$PROJECT_DIR"
-
-          gradle \
-            :app:assembleDebug \
-            --stacktrace \
-            --no-daemon
-
-      - name: Find generated APK
-        run: |
-          find "$PROJECT_DIR/app/build/outputs" \
-            -type f \
-            -name "*.apk" \
-            -print
+          gradle :app:assembleDebug --stacktrace --no-daemon
 
       - name: Prepare downloadable APK
         run: |
-          APK=$(find "$PROJECT_DIR/app/build/outputs/apk/debug" \
-            -type f \
-            -name "*.apk" \
-            | head -n 1)
-
+          APK=$(find "$PROJECT_DIR/app/build/outputs/apk/debug" -type f -name "*.apk" | head -n 1)
           if [ -z "$APK" ]; then
             echo "APK was not generated"
             exit 1
           fi
-
           cp "$APK" Edenyra-Field-Voice-offline.apk
-
           ls -lh Edenyra-Field-Voice-offline.apk
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Edenyra-Field-Voice-offline-APK
           path: Edenyra-Field-Voice-offline.apk
